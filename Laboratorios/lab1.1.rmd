@@ -1,0 +1,170 @@
+---
+title: 'Laboratorio 1.1: Exploración y Visualización de Datos'
+author: 'Guillermo Martínez y Patricio Merino'
+date: "Marzo 2019"
+output:
+  html_document:
+    theme: default
+    toc: no
+  pdf_document:
+    toc: no
+---
+
+# Instrucciones
+
+1. Trabaje en equipos de dos personas. Salvo excepciones, no se corregirá entregas con menos de dos integrantes.
+
+2. Modifique este archivo `.Rmd` agregando sus respuestas donde corresponda.
+
+3. Para cada pregunta, cuando corresponda, **incluya el código fuente que utilizó para llegar a su respuesta**.
+
+4. Al final de la clase, **genere un archivo HTML usando RStudio** y súbalo a U-Cursos.
+   Basta con que uno de los integrantes haga la entrega. Si ambos hacen una entrega en U-Cursos, se revisará cualquiera de éstas.
+
+
+# Parte 1
+
+Cargue el dataset de número de accidentes de tránsito por localidad y responda las siguientes preguntas.
+
+```{r}
+tipos <- read.table("https://users.dcc.uchile.cl/~hsarmien/mineria/datasets/accidentes_2010_2011.txt")
+```
+
+1. ¿Cuáles son las dimensiones del dataset (filas, columnas)? (Recuerde adjuntar código)
+
+```{r}
+nrow(tipos)
+ncol(tipos)
+```
+El dataset "tipos" tiene 4296 filas y 5 columnas.
+
+2. ¿Qué describe cada línea del dataset? (ejemplifique tomando el dato de la fila 34).
+
+```{r}
+str(tipos)
+```
+Cada línea del dataset ```tipos``` muestra la cantidad de varios tipos de accidentes ocurridos en un año y lugar específico de Chile. 
+
+```{r}
+tipos[34,]
+```
+
+Por ejemplo tomando el dato de la fila 34 podemos observar que la cantidad de atropellos el año 2011 en la comuna de Mejillones es 8.
+
+3. Filtre los datos y genera un dataframe en el cual se indique la cantidad de atropellos que hubo en la localidad de COCHRANE en el año 2010 y 2011.
+
+```{r}
+head(tipos[(tipos$Anio == 2010 | tipos$Anio == 2011) & tipos$Descripcion == "COCHRANE" & tipos$TipoAccidente == "Atropello", ])
+```
+
+
+4. Filtre los datos para incluir sólo los accidentes ocurridos en comunas en el año 2011. Genere un boxplot donde se indique la cantidad de accidentes en cada comuna, categorizado por cada tipo de accidente. 
+
+```{r}
+tipos2011 <- with(tipos,tipos[Muestra == "Comunal" & Anio == 2011, ])
+plot(tipos2011$TipoAccidente, tipos2011$Cantidad)
+```
+
+# Parte 2
+
+Cargue el dataset de _afectados_ por accidentes de tránsito y responda las siguientes preguntas.
+
+```{r}
+afectados <- read.table("https://users.dcc.uchile.cl/~hsarmien/mineria/datasets/afectados_2010_2011.txt")
+```
+
+1. En base al gráfico presentado más abajo ¿Sería razonable comparar la cantidad de heridos leves de la `Región Metropolitana` con la `Región de los Lagos`? ¿Por qué? Si su respuesta es negativa, proponga una forma de hacer una mejor comparación.
+
+No es razonable debido a que la población (y la densidad) de la Región Metropolitana es considerablemente mayor a la población de la Región de Los Lagos. Una mejor comparación podría ser la cantidad de accidentes respecto a la población o a su densidad de población de cada región.
+
+2. De acuerdo al siguiente gráfico ¿Qué es lo que quiere mostrar? Proponga una forma de _mejorar_ este gráfico y cómo esa forma cumple mejor el objetivo de la visualización.
+
+```{r, fig.height=12, fig.width=12, echo = F}
+library(ggplot2)
+ggplot(data = afectados[afectados$Muestra == "Regional", ]) +
+  geom_bar(aes(x = Descripcion, y = Cantidad), stat = "identity") + 
+  facet_grid(Estado ~ Anio) +
+  coord_flip() +
+  xlab("Comuna") + 
+  ylab("Cantidad")   
+```
+Este gráfico tiene dos propósitos: comparar la cantidad de accidentes entre regiones y comparar la cantidad de afectados en sus distintos estados.
+
+El principal problema es que cuesta comparar entre regiones los afectados cuyo estado no es leve debido a que la cantidad de afectados es mucho menor que el valor máximo del eje x. Para solucionar el problema, se propone que cada tipo de afectado tenga su propia escala en el eje x. Este cambio provocará que no se pueda comparar visualmente entre tipos de afectados, por lo que se propone generar otro gráfico con tipos de afectados a nivel nacional.
+
+
+# Parte 3
+
+Vamos a estimar la cantidad de muertos por accidente de tránsito por cada diez mil habitantes de cada comuna. Note que un accidente de tránsito puede ser Choque, Colisión, Atropello, etc.
+
+Cargue el dataset de número de habitantes por cada comuna, obtenido a partir de datos del Censo 2002.
+
+```{r}
+poblacion <- read.table("https://users.dcc.uchile.cl/~hsarmien/mineria/datasets/demografico.txt", header=T)
+```
+
+Además, ejectute y genere los siguientes datasets:
+
+```{r}
+muertosPorComuna <- with(afectados, afectados[Muestra == "Comunal" & Estado == "Muertos" & Anio == 2011, ])
+
+tiposPorComuna <- with(tipos, tipos[Muestra == "Comunal" & Anio == 2011, ])
+
+accidentesPorComuna <- aggregate(Cantidad ~ Descripcion, tiposPorComuna, FUN=sum)
+
+cruceAccidentes <- merge(accidentesPorComuna, poblacion, by="Descripcion")
+```
+
+1. Explique brevemente qué datos muestran las nuevas tablas generadas.
+
+- poblacion: se muestra la cantidad de habitantes de cada comuna.
+- muertosPorComuna: muestra la cantidad de muertos por comuna en el año 2011.
+- tiposPorComuna: muestra la cantidad de accidentes de cada tipo por comuna el año 2011.
+- accidentesPorComuna: muestra la cantidad total de accidentes por comuna durante el año 2011.
+- cruceAccidentes: muestra la cantidad de accidentes y habitantes por comuna.
+
+
+2. Ordene cada uno de los datasets `muertosPorComuna` y `cruceAccidentes` por el nombre de la comuna (Descripcion). Use ```order```. 
+
+```{r}
+muertosPorComuna <- muertosPorComuna[order(muertosPorComuna$Descripcion, decreasing = FALSE), ]
+cruceAccidentes <- cruceAccidentes[order(cruceAccidentes$Descripcion, decreasing = FALSE), ]
+```
+
+
+3. Genere un nuevo dataframe que contenga el nombre de la comuna y la _cantidad de muertes por cualquier tipo de accidente de tránsito_ por cada diez mil habitantes en cada una de las comunas. Este último valor lo puede generar mediante la siguiente fórmula:
+
+```{r, eval=F}
+MuertesPorAccidente = 10000 * muertosPorComuna$Cantidad / (cruceAccidentes$Cantidad * cruceAccidentes$Poblacion + 1)
+```
+
+El dataframe resultante debe verse como el siguiente ejemplo:
+
+| Descripcion | MuertesPorAccidente |
+|-------------|---------------------|
+| AISEN       | 0.0173356644        |
+| ALGARROBO   | 0.0086357277        |
+| ALHUE       | 0.3073424102        |
+| ...         | ...                 |
+
+```{r}
+ndataframe <- data.frame(Descripcion = muertosPorComuna$Descripcion, MuertesPorAccidente = 10000 * muertosPorComuna$Cantidad / (cruceAccidentes$Cantidad * cruceAccidentes$Poblacion + 1))
+```
+
+
+4. Según los datos obtenidos, genere un gráfico de barras con las top 10 comunas con mayor tasa de muertes por accidente de tránsito. _Hint: para ordernar los datos en un gráfico de barras, en ggplot, use `aes(x=reorder(Descripcion, muertesPorAccidente), y=muertesPorAccidente))`. _
+
+```{r}
+ndataframe2 <- ndataframe[order(ndataframe$MuertesPorAccidente, decreasing = TRUE), ]
+n3 <- ndataframe2[1:10,]
+
+library(ggplot2)
+
+ggplot(n3) +   # asociamos un data frame a ggplot
+  geom_bar(aes(x = Descripcion, y = MuertesPorAccidente), stat="identity") +   # creamos un grafico de barras como una capa
+  coord_flip() +  # transformamos el grafico invirtiendo los ejes de coordenadas (sÃ³lo visualmente)
+  ggtitle("Tasa de muertos por accidentes") + # ttulo
+  xlab("Comuna") + ylab("Tasa de muertes")  # etiquetas
+```
+
+

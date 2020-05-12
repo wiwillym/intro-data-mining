@@ -1,0 +1,131 @@
+---
+title: "Laboratorio 3.1 - Clustering en R"
+author: "Guillermo Martínez, Sofía Valenzuela"
+date: "Mayo 2019"
+output: 
+  html_document: 
+    theme: default
+    toc: yes
+---
+
+
+# Instrucciones
+
+1. Trabaje en equipos de dos personas. Salvo excepciones, no se corregirá entregas con menos de dos integrantes.
+
+2. Modifique este archivo `.Rmd` agregando sus respuestas donde corresponda.
+
+3. Para cada pregunta, cuando corresponda, **incluya el código fuente que utilizó para llegar a su respuesta**.
+
+4. Al final de la clase, **genere un archivo HTML usando RStudio** y súbalo a U-Cursos.
+   Basta con que uno de los integrantes haga la entrega. Si ambos hacen una entrega en U-Cursos, se revisará cualquiera de éstas.
+
+# Laboratorio
+
+Para este laboratorio usaremos el dataset de cantidad de denuncias por 100 mil habitantes por tipo de delito desde el año 2001 al 2016 en Chile (Fuente: http://www.seguridadpublica.gov.cl/estadisticas/tasa-de-denuncias-y-detenciones/delitos-de-mayor-connotacion-social-series-de-datos-2001-2017/). 
+
+Cargue el siguiente dataset:
+
+```{r}
+data <- read.table('https://users.dcc.uchile.cl/~hsarmien/mineria/datasets/denuncias-2001-2016.txt')
+```
+
+Usaremos sólo los datos del 2005. Ejecute las siguientes líneas de código para filtrar los datos:
+
+```{r, eval=T, results=F}
+anio <- 2005
+x <- data[data$anio == anio, ]
+rownames(x) <- x$comuna
+x <- x[, c(-1, -2)]
+head(x)
+```
+
+
+## Parte 1: Exploración de datos
+
+**1.1.** Describa los datos: qué representa cada observación (fila), cada atributo (columna), y cuántas observaciones hay en el dataset.
+
+```{r}
+dim(x)
+```
+Hay 346 observaciones, donde cada fila representan las denuuncias por localidad y cada columna es un tipo diferente de denuncia realizada en una localidad especifica por cada 100 mil habitantes.
+
+**1.2.** Genere un boxplot a partir de los datos y describa tres características de los datos a partir del gráfico.
+```{r fig.width=12}
+boxplot(x)
+```
+Del gráfico podemos ver que la mayor cantidad de denuncias es sobre hurtos, mientras que las denuncias por homicidio y violación se mantienen muy cercanos a 0.
+También se puede observar que las denuncias por robo sorpresa, robo vehícula y robo violencia presentan una mayor cantidad de outliers, lo que significaría que hay más denuncias en los datos de lo que se esperaría.
+
+**1.3.** Respecto a los *hurtos*, ¿qué porcentaje de estos datos tienen una tasa de alrededor de 250 denuncias, aproximadamente? Indique cómo obtuvo la respuesta. 
+
+
+## Parte 2: K-means
+
+**2.1.** Describa qué es lo que hace cada línea del código adjunto.
+
+```{r}
+km.out <- kmeans(x, 3, nstart = 5)
+km.out$centers 
+```
+La primera línea de código ejecuta el método K-means sobre x, con 3 clusters y 5 iteraciones para así quedarse con el clustering que tiene el error más bajo.
+La segunda línea indica donde están ubicados los centroides de los clusters.
+
+
+**2.2.** ¿Cómo podría evitar los resultados variables de `K-means`? 
+Para evitar los resultados variables, se podría utilizar Bisecting K-means, teniendo posiciones de centroides menos varibles independiente de la iteración.
+
+**2.3** ¿Por qué es necesario escalar los datos antes de ejecutar `K-means` (es decir, aplicar `scale` sobre los datos)? Genere un scatterplot matrix usando `pairs` (sin escalar), resaltando cada cluster usando el parámetro `col` (ver el tutorial para un ejemplo) y responda.
+```{r fig.width=12}
+pairs(x, col=km.out$cluster)
+```
+
+Dado que K-means compara distancias para elegir qué punto pertenece a cada cluster, los atributos comparados deben estar en la misma escala, para aportar lo mismo a las distancias.
+
+**2.4.** ¿Cómo podría encontrar *outliers* en los datos usando `K-means`? Describa su propuesta y muestre un par de ejemplos con distintos números de clusters (si es necesario), con y sin escalar los datos. 
+```{r fig.width=12}
+xscale = scale(x)
+km.out2 <- kmeans(xscale, 4, nstart = 5)
+km.out3 <-kmeans(x, 4, nstart = 5)
+pairs(xscale,col=km.out2$cluster)
+pairs(x, col=km.out3$cluster)
+```
+
+
+Podemos fijarnos en los SSE de los clusters, y si alguno es mucho mayor al promedio, aumentamos el número de clusters y visualizamos encontrando los clusters de outliers. En este caso no tiene sentido escalar ya que los datos tienen todos la misma escala, que es el número de denuncias por cada 100 mil habitantes. 
+
+## Parte 3: Clustering Jerárquico Aglomerativo
+
+**3.1** Usando el dataframe `x` (sin escalar), ejecute cada uno de los 3 métodos de clustering jerárquico: `complete`, `single` y `average`, y visualice los dendrogramas formados. Adjunte código.
+```{r fig.width=12}
+hc.complete <- hclust(dist(x), method = "complete")
+hc.single <- hclust(dist(x), method = "single")
+hc.average <- hclust(dist(x), method = "average")
+par(mfrow=c(1,3))
+plot(hc.complete, main="Complete", xlab="", ylab="", cex=.9)
+plot(hc.single, main="Single", xlab="", ylab="", cex=.9)
+plot(hc.average, main="Average", xlab="", ylab="", cex=.9)
+```
+
+
+**3.2.** Indique dónde haría los cortes en cada método. Apoye su respuesta adjuntando el dendograma y muestre dónde se harían los cortes (ver el tutorial para un ejemplo). Adjunte código.
+```{r fig.width=12}
+par(mfrow=c(1,3))
+plot(hc.complete, main="Complete", xlab="", ylab="", cex=.9)
+rect.hclust(hc.complete, h=700)
+plot(hc.single, main="Single", xlab="", ylab="", cex=.9)
+rect.hclust(hc.single, h=100)
+plot(hc.average, main="Average", xlab="", ylab="", cex=.9)
+rect.hclust(hc.complete, h=400)
+```
+
+
+Se elige la altura intentando formar clusters bien distribuidos.
+En el método jerárquico complete elegimos la altura h = 700.
+En el método jerárquico single elegimos h = 100.
+Finalmente, en el método jerárquico average tomamos h = 400.
+
+**3.3.** ¿Cómo sería posible encontrar *outliers* en los datos usando clustering jerárquico? 
+
+Visualizamos los cortes de cada clustering, y los clusters más pequeños son aquellos que se alejan mucho del número estándar de denuncias, lo que nos hace pensar que podrían tratarse de outliers. Si en los tres tipos de clusterings se repite que un dato está en un cluster significativamente pequeño, lo consideramos como outlier. 
+

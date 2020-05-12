@@ -1,0 +1,146 @@
+---
+title: "Laboratorio 3.2 - Clustering en R: Evaluación"
+author: "Sofía Valenzuela, Guillermo Martínez"
+date: "03 de Junio 2019"
+output: 
+  html_document: 
+    toc: yes
+---
+
+
+# Instrucciones
+
+1. Trabaje en equipos de dos personas. Salvo excepciones, no se corregirá entregas con menos de dos integrantes.
+
+2. Modifique este archivo `.Rmd` agregando sus respuestas donde corresponda.
+
+3. Para cada pregunta, cuando corresponda, **incluya el código fuente que utilizó para llegar a su respuesta**.
+
+4. Al final de la clase, **genere un archivo HTML usando RStudio** y súbalo a U-Cursos.
+   Basta con que uno de los integrantes haga la entrega. Si ambos hacen una entrega en U-Cursos, se revisará cualquiera de éstas.
+
+
+# Laboratorio
+
+En este laboratorio vamos a evaluar dos métodos de clustering: `k-means` y `dbscan`. 
+Usaremos el siguiente dataset que pueden descargar más abajo. 
+
+```{r}
+df <- read.table("http://users.dcc.uchile.cl/~hsarmien/mineria/datasets/d31.txt")
+```
+
+En base a este dataset, responda las siguientes preguntas.
+
+# Parte 1: k-means
+
+**1.1.** Utilice el método del codo para elegir dos números de clusters para `k-means`. Indique por qué eligió esos `k`. Además, genere un gráfico para cada uno de los dos `k` elegidos en el cual se puedan apreciar los clusters. Use `plot` con los parámetros `pch=20` y `cex=2`.
+
+```{r}
+set.seed(2)
+wss <- 0
+clust <- 15   # graficaremos hasta 15 clusters
+for (i in 1:clust){
+  wss[i] <- sum(kmeans(df, centers=i, nstart=100)$withinss)   # <---- se ejecuta kmeans 100 veces y se retorna el de mejor WSS dentro de esos 100
+}
+    plot(1:clust, wss, type="b", xlab="Numero de clusters", ylab="wss")
+```
+
+Se eligió k=3 y k=4, esto debido a que se genera un pequeño "codo" entre k=3 y k=4. 
+
+```{r}
+k1 <- kmeans(df, 3, nstart=20)
+k2 <- kmeans(df, 4, nstart=20)
+plot(df, col=(k1$cluster), main="Resultados usando k = 3 (plot con colores)", xlab="", ylab="", pch=20, cex=2)
+plot(df, col=(k2$cluster), main="Resultados usando k = 4 (plot con colores)", xlab="", ylab="", pch=20, cex=2)
+```
+
+
+# Parte 2: DBSCAN
+
+Para correr dbscan y visualizar los clusters deben cargar las siguientes bibliotecas:
+```{r, message=FALSE, warning=FALSE}
+library("dbscan")  
+library("ggplot2")
+```
+
+**2.1.** Ejecute DBSCAN y genere un gráfico de los clusters obtenidos usando `ggplot`. Use los parámetros `eps=0.9`y `minPts=5`.
+
+*Nota:* Procure no alterar el dataset original (df). Si lo va a modificar, genere una copia de la variable. Si presenta problemas con la función `dbscan`, invóquela utilizando `dbscan::dbscan`.
+
+```{r}
+df1 <- df
+df2 <- df
+```
+
+```{r}
+set.seed(2)
+db <- dbscan::dbscan(df1[, c(1, 2)], eps = 0.9, minPts = 5)
+db
+```
+```{r}
+df1$cluster <- factor(db$cluster)
+ggplot(df1, aes(x=V1, y=V2, colour=cluster)) + geom_point()
+```
+
+
+
+**2.2.** Una forma de encontrar clusters más claros, es estimar el valor `eps` usando el método de la rodilla (basado en KNN). La idea de este procedimiento es calcular la distancia promedio de cada punto a sus `k` vecinos más cercanos los cuales son graficados en orden ascendente. El objetivo es determinar la _rodilla_ el cual corresponderá al valor óptimo de `eps`. Pruebe varios valores de `h` utilizando el siguiente código y adjunte el gráfico con el mejor `h` que usted considera. Además ejecute y grafique los clusters usando el método DBSCAN haciendo uso de parámetro `eps` (`h`) encontrado previamente.
+
+```{r}
+dbscan::kNNdistplot(df2, k =  3)   # k vecinos
+abline(h = 0.6, lty = 2, col = "red")  # ajuste h
+```
+```{r}
+db1 <- dbscan::dbscan(df2[, c(1, 2)], eps = 0.6, minPts = 5)
+df2$cluster <- factor(db1$cluster)
+ggplot(df1, aes(x=V1, y=V2, colour=cluster)) + geom_point()
+```
+
+
+# Parte 3: Evaluación
+
+Para evaluar clusters existen una serie de métodos y métricas. Para este laboratorio usaremos un tipo de evaluación llamada *evaluación interna*. Existen dos métricas para evaluar: 
+  
+  * **Cohesión**: mide la distancia a la que están los puntos dentro de cada cluster.
+  * **Separación**: mide cuan separados están los clusters. 
+
+Para obtener estos valores se emplea el siguiente código:
+
+```{r, eval=F}
+# no olvide quitar el flag "eval = F" en la linea anterior en RStudio
+
+library("fpc")
+metrics <- cluster.stats(dist(df), XX$cluster)  # XX es el resultado del método a evaluar (modificar por el correspondiente)
+metrics$average.within  # cohesion
+metrics$average.between  # separacion
+```
+
+**3.1.** Para cada uno de los experimentos (los dos de `kmeans` y los dos de `dbscan`), adjunte el código que permita obtener las métricas cohesión y separación.
+
+```{r, message=FALSE, warning=FALSE}
+# no olvide quitar el flag "eval = F" en la linea anterior en RStudio
+
+library("fpc")
+metricsk1 <- cluster.stats(dist(df), k1$cluster)
+metricsk2 <- cluster.stats(dist(df), k2$cluster)
+metricsdb <- cluster.stats(dist(df), db$cluster)
+metricsdb1 <- cluster.stats(dist(df), db1$cluster) 
+```
+```{r, echo=FALSE}
+print(paste("cohesion k-means k=3:", metricsk1$average.within))
+print(paste("separacion k-means k=3:", metricsk1$average.between))
+print(paste("cohesion k-means k=4:", metricsk2$average.within))
+print(paste("separacion k-means k=4:", metricsk2$average.between))
+print(paste("cohesion dbscan con eps = 0.9:", metricsdb$average.within))
+print(paste("separacion dbscan con eps = 0.9:", metricsdb$average.between))
+print(paste("cohesion dbscan con eps = 0.6 (método de la rodilla):", metricsdb1$average.within))
+print(paste("separacion dbscan con eps = 0.6 (método de la rodilla):", metricsdb1$average.between))
+```
+
+# Parte 4: Análisis de Resultados.
+
+**4.1.** En base a los valores de Separación y Cohesión obtenidos para cada método y configuración. ¿Cuál cree que es el que tiene mejor resultado? Comente al respecto basándose principalmente en las métricas.
+
+El clustering formado por DBSCAN en el cual se estima el eps a través del método de la rodilla es el que tiene mejores resultados. Si bien la separación es menor con respecto a los otros métodos, la diferencia es significativamente pequeña en comparación a la superiorad que posee en cuanto a la cohesión, dado que esta es mucho menor al compararla con los otros métodos.
+
+

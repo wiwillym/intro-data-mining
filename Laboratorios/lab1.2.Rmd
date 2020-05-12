@@ -1,0 +1,136 @@
+---
+title: 'Laboratorio 1.2: Exploración y Visualización de Datos'
+author: "Sebastian Gonzalez y Guillermo Martinez"
+date: "25 de marzo de 2019"
+output: 
+  html_document: 
+    theme: default
+    toc: yes
+---
+
+# Instrucciones
+
+1. Trabaje en equipos de dos personas. Salvo excepciones, no se corregirá entregas con menos de dos integrantes.
+
+2. Modifique este archivo `.Rmd` agregando sus respuestas donde corresponda.
+
+3. Para cada pregunta, cuando corresponda, **incluya el código fuente que utilizó para llegar a su respuesta**.
+
+4. Al final de la clase, **genere un archivo HTML usando RStudio** y súbalo a U-Cursos.
+   Basta con que uno de los integrantes haga la entrega. Si ambos hacen una entrega en U-Cursos, se revisará cualquiera de éstas.
+
+
+# Laboratorio
+
+En esta sesión trabajaremos con los datos del Proceso Constituyente 2016-2017 publicados en el Portal de Datos Abiertos del Gobierno de Chile. Los datos corresponden a las actas de los Encuentros Locales Autoconvocados (ELAs), en cada cual, un grupo de personas se reune a discutir distintos conceptos como por ejemplo; salud, educación, seguridad, etc.
+
+Los datos con que trabajaremos consisten en la cantidad de veces que cada concepto constitucional fue mencionado por cada localidad de Chile. 
+
+Para cargar los datos, use:
+
+```{r}
+data_tf <- read.csv("http://dcc.uchile.cl/~hsarmien/mineria/datasets/actas.txt", header = T)
+```
+
+**Por cada pregunta adjunte el código R que utilizó para llegar a la respuesta. Respuestas sin código no serán evaluadas**
+
+## 1. Exploración básica
+
+1. ¿Cuáles son las dimensiones del dataset (filas, columnas)? Adjunte código o indique cómo determinó la cantidad de datos total. 
+```{r}
+nrow(data_tf)
+ncol(data_tf)
+```
+El  dataset "data_tf"" tiene 328 filas y 113 columnas.
+
+2. ¿Qué describe cada línea del dataset? (ejemplifique tomando el dato de la fila 12)
+
+```{r}
+head(data_tf[12, ])
+```
+Cada línea del dataset contiene la cantidad de actas de los Encuentros Locales Autoconvocados (ELAs) de cada localidad.
+
+3. ¿Existen localidades repetidas en el dataset? Adjunte el código o indique cómo llegó a esa conclusión. 
+
+```{r}
+any(duplicated(data_tf[,1]))
+```
+No existen localidades repetidas en el dataset. Aprovechando la pequeña cantidad de localidades, se filtró unicamente por localidad, verificando visualmente la no existencia de localidades repetidas.
+
+4. Liste los nombres de las columnas del dataset `data_tf`. Adjunte código en R y recuerde que si el resultado es muy largo emplee `head`. 
+```{r}
+head(colnames(data_tf))
+```
+Se utilizó "head" debido a que el resultado es muy largo.
+
+## 2. Análisis
+
+1. Liste todas las localidades donde *no* se discutió el concepto `a_la_salud`. 
+```{r}
+data_tf2 <- data_tf[(data_tf$a_la_salud == 0),]
+head(data_tf2[,1])
+```
+
+
+2. Liste las 10 localidades que más mencionaron el concepto `patriotismo`. 
+```{r}
+data_tf3 <- data_tf[order(data_tf$patriotismo, decreasing = TRUE), ]
+data_tf3[1:10,1]
+```
+
+3. Liste las localidades que más mencionaron el concepto de `no_discriminacion`. Para ello sólo considere aquellas que están sobre el 95% del resto.
+
+```{r}
+p = quantile(data_tf$no_discriminacion, c(.95))
+data_tf[(data_tf$no_discriminacion > p),1]
+```
+
+
+4. Liste las 10 localidades que más participaron en el proceso. Describa cómo definió su medida de participación.
+```{r}
+r = rowMeans(data_tf[,-1])
+d <- data.frame(localidad = data_tf[,1], mean = r)
+d[order(d$mean, decreasing = TRUE), ][1:10,1]
+```
+Calculamos el promedio de cada localidad dentro de las distintas opciones de actas y las ordenamos según ese criterio. Luego filtramos.
+
+5. Liste los 10 conceptos menos mencionados a lo largo de todo el proceso.
+
+```{r}
+s = colSums(data_tf[,-1])
+concepts <- names(data_tf[,-1])
+d2 <- data.frame(conceptos = concepts, sum = s)
+d2[order(s, decreasing = FALSE), ][1:10,1]
+```
+Sumamos cada concepto sobre todas las localidades, ordenamos y luego filtramos.
+
+6. Mediante un gráficos de barras (ggplot), muestre los top 10 conceptos más mencionados en cada una de las siguientes localidades (adjunte gráficos y código):
+
+- `Tarapaca/Iquique/Iquique`
+- `Los Rios/Valdivia/Valdivia`
+- `Metropolitana de Santiago/Santiago/Santiago`
+
+Idea: Use `melt` o `gather` para convertir los datos a un formato largo y luego filtre los top 10 conceptos.
+Además, para ordenar las barras del gráfico, use `x = reorder(variable, value)` en el `aes`. 
+
+```{r}
+
+```
+
+7. De la pregunta anterior, ¿considera que es razonable usar el conteo de frecuencias para determinar las localidades que tuvieron mayor participación en el proceso? ¿Por qué? Sugiera una forma distinta de hacerlo.
+
+```{r}
+# RESPUESTA
+```
+
+## Pregunta bonus (opcional)
+
+Genere un gráfico de barras listando los "top conceptos" y su frecuencia total usando `ggplot`. 
+
+Para crear el data frame con los conceptos y sus frecuencias, convierta la tabla usando `melt` o `gather`. Luego, para calcular las frecuencias totales por concepto, use `aggregate` o `group_by`. Para los top conceptos, considere sólo aquellos cuya frecuencia total es mayor que el 75% de las frecuencias totales.
+
+Respecto al gráfico, las barras deben estar ordenadas de mayor a menor, el gráfico girado de forma de poder leer los conceptos (es decir, los conceptos en el eje `y` y las barras con las frecuencias a lo largo del eje `x`), y además incluya el valor de la frecuencia junto a cada barra usando `geom_text`.
+
+
+
+
