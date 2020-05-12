@@ -1,0 +1,1021 @@
+---
+title: "HITO 3: Comentarios en Reddit - Clasificación y Clustering"
+author: "Guillermo Martínez, F. Giovanni Sanguineti, Sebastián Solanich, Matías Vergara"
+date: "28 de Junio, 2019"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+<div style="text-align: justify">
+
+# Hito 3
+
+El documento sigue el mismo formato que para los anteriores hitos: primero se muestran los elementos del 3, luego del hito 2 y finalmente del Hito 1, esto para facilitar su corrección.
+
+***
+
+## Preguntas de Investigación: ¿En qué hemos decidido que decante nuestra investigación?
+
+Finalmente, tras las observaciones recibidas luego del hito 2, tanto por parte del equipo docente como por parte de compañeros y compañeras, además de una amplia discusión del equipo, se ha decidido  responder dos preguntas de investigación:
+	
+	1. ¿Es posible determinar qué hace popular a un comentario? ¿Hay un patrón para el “éxito” en Reddit?
+
+	2. ¿Se puede utilizar el dataset para crear una herramienta que indique sobre qué se está hablando en Internet?
+
+Para motivar la investigación, se optó por responder las preguntas de tal forma que se pudiera contar con hipótesis, las que se basaron en los datos obtenidos por la investigación previa. Es así como se cree que, para responder la primera pregunta, se puede afirmar que  el éxito de un comentario está directamente relacionado con su contenido y no precisamente con quíen lo escribe. No es muy relevante si es una persona que tiene un nivel de karma alto o bajo, acumulado de sus comentarios históricos. No obstante, si son importante las palabras relevantes que están dentro de dicho comentario y el análisis de sentimiento que se pueda efectuar del mismo.
+Por otra parte, respecto de la segunda pregunta, creemos que sí es posible, obteniendo una herramienta que nos permita automatizar etiquetas para saber de qué se está hablando en internet en un momento dado. 
+
+Para poder obtener datos que permitan rechazar o aceptar las hipótesis, se llevaron a cabo tres experimentos: una regresión lineal realizada gracias a la sugerencia que realizó un compañero, el segundo una profundización del experimento que relacionaba sentimientos con popularidad del hito pasado realizando clustering y el tercero que consistió en realizar clasificación utilizando el método de Naive-Bayes, como extensión del experimento del clustering del hito 2.
+
+
+***
+
+## Experimento 1: Asociar palabras a popularidad 
+
+El primer experimento consistió en asociar palabras a la popularidad mediante el algoritmo "bag of words", en donde no se considera orden ni contexto de cada palabra. Para esto se realizo una regresión logística en la cual se prueban distintas arquitecturas de redes neuronales. La data es normalizada para optimizar el aprendizaje y se aplican métodos como drop-out, regularization para evitar over-fitting.
+
+```
+import pandas as pd
+import numpy as np
+from matplotlib import pyplot as plt
+import json
+
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.model_selection import train_test_split
+
+from keras.models import Sequential
+from keras.layers import Dense, Dropout
+from keras.optimizers import Adam
+from keras import regularizers
+
+#cargar dataset
+df = pd.read_csv("DB/usableCommentsFixFull.csv", usecols = [0,5], header=None, names=["text", "votes"])
+df["votes"] = df["votes"].astype("int32")
+
+#subsample
+V = 2024 # cantidad de comentarios con menor frecuencia en votos
+even = df[df["votes"] < 0]
+even = even.append(df[df["votes"] >= 25].sample(n=V))
+even = even.append(df[(df["votes"] >= 0) & (df["votes"] < 25)].sample(n=V))
+even = even.sample(frac=1).reset_index(drop=True)
+del df
+print(even.info())
+print(even.describe())
+
+text = even["text"].values #input data
+votes = even["votes"].values #target data
+
+#generar bag of words (vector de palabras)
+dictionary_length = 1000
+vectorizer = CountVectorizer(analyzer = "word", tokenizer = None, preprocessor = None,
+                             stop_words = 'english', decode_error='strict',lowercase='False', max_features = dictionary_length)
+data_features = vectorizer.fit_transform(text)
+X = data_features.toarray()
+y = votes.reshape([-1,1])
+x_train, x_test, y_train, y_test = train_test_split(X, y, test_size=0.15)
+
+learning_rates = [0.01]
+
+for lr in learning_rates:
+    # red neuronal de 3 capas, 16 neuronas en hidden layer
+    model = Sequential()
+    model.add(Dense(16, input_shape=(dictionary_length,), activation="sigmoid"))
+    model.add(Dense(1))
+    model.compile(Adam(lr=lr), 'logcosh')
+
+    #entrenamiento
+    history = model.fit(x_train, y_train, batch_size = 250, epochs = 100, validation_data = (x_test, y_test), verbose = 1)
+    history_dict=history.history
+    
+    loss_values = history_dict['loss']
+    val_loss_values=history_dict['val_loss']
+
+    #guardar el modelo de manera local
+    model.save_weights('model_weights.h5')
+    with open('model_architecture.json', 'w') as f:
+        f.write(model.to_json())
+
+    plt.figure()
+    plt.plot(loss_values,'b',label='training loss')
+    plt.plot(val_loss_values,'r',label='validation loss')
+    plt.legend()
+    plt.title("Training and validation loss for LR: " + str(lr))
+#muestra grafico de entrenamiento, error en datos de entrenamiento y validacion
+plt.show()
+```
+
+Los resultados de la regresión logística se aprecian a continuación:
+
+<div style="text-align: center">
+![](trainingandvalidationloss.jpg)
+</div>
+
+Analizando el resultado, se puede apreciar que a medida que el modelo "aprende", no es capaz de generalizar para datos que no conoce, realizando overfit. Encontramos 3 posibles motivos:
+  
+  1. Baja cantidad de datos una vez realizada la limpieza de duplicados.
+  
+  2. Pérdida del orden y contexto de las palabras quita significancia de las mismas.
+  
+  3. Información externa al dataset podría ser escencial: ¿El comentario X es respuesta de Y?
+
+Por otro lado, tenemos que el error en entrenamiento es cercano a 20, mientras que el error en datos para validación es cercano a 250. Es decir, la red no es capaz de generalizar para datos que no conoce.
+Luego, atacar el problema mediante el algoritmo de bag of words resta información útil al modelo.
+
+Dentro de los hallazgos principales y nuevas hipótesis tenemos que:
+
+  - Los resultados obtenidos no permiten validar nuestra hipótesis sobre       palabras de interés, en cuanto no se obtienen resultados lo suficientemente buenos incluso mediante clasificación (Hito 2).
+  
+  - Otros modelos tales como RNN's, LTSM, recursive NN podrían desempeñarse    mejor y llevar a una validación.
+
+
+Con todo lo anterior, utilizaremos tecnicas de conteo donde se buscan los pares que toman (palabra, voto) para confirmar la siguiente hipótesis sobre la regresión/red neuronal:
+
+  - Pérdida del orden y contexto de las palabras quita significancia de las    mismas.
+  
+Luego, para cada palabra se arma una 3-tupla con la cantidad de apariciones valoradas como negativas, 0 (sin votos) y positivas.
+
+```
+import pandas as pd
+import numpy as np
+from sklearn.feature_extraction.text import CountVectorizer
+
+#cargar el dataset
+df = pd.read_csv("DB/usableCommentsFixFull.csv", usecols = [0,5], header=None, names=["text", "votes"])
+df["votes"] = df["votes"].astype("int32")
+df = df.drop_duplicates(subset = 'text', keep='first')
+
+#subsample
+V = 2024
+even = df[df["votes"] < 0]
+even = even.append(df[df["votes"] >= 25].sample(n=V))
+even = even.append(df[(df["votes"] >= 0) & (df["votes"] < 25)].sample(n=V))
+even = even.sample(frac=1).reset_index(drop=True)
+
+dictionary_length = 500
+vectorizer = CountVectorizer(analyzer = "word", tokenizer = None, preprocessor = None,
+                             stop_words = 'english', token_pattern=r"\b[a-zA-Z]{4,8}$", decode_error='strict',lowercase='False', max_features = dictionary_length)
+data_features = vectorizer.fit(even["text"])
+df2 = pd.DataFrame(data_features.get_feature_names(), columns=["word"])
+freq = np.array(data_features.transform(even["text"]).toarray().sum(axis=0)).reshape([-1,1])
+df2["frequency"] = pd.DataFrame(freq, dtype=np.int32)
+
+print(df2.info())
+print(df2.describe())
+print(df2.head())
+
+delta = [[0,0,0] for i in range(df2.shape[0])]
+
+for i in range(df2.shape[0]): # por cada palabra
+    for j in range(df.shape[0]): # ver en cada comentario si es positivo o negativo
+        if df2["word"].get(i) in even["text"].get(j):
+            if even["votes"].get(j) < 0:
+                delta[i][0] += 1
+            elif even["votes"].get(j) == 0:
+                delta[i][1] += 1
+            else:
+                delta[i][2] += 1
+
+# ojo: se veran TODAS las palabras del diccionario (extenso)
+result = list(zip(df2["word"], delta))
+for i in range(len(result)):
+    print(result[i])
+
+```
+Como resultados tenemos los siguientes ejemplos:
+
+  - Ejemplos de palabras de las que se esperaría una buena recepción y su     resultado real.
+  
+<div style="text-align: center">
+![](goodreception.png)
+</div>
+
+  - Ejemplos de palabras de las que se esperaría una mala recepción y su      resultado real.
+  
+<div style="text-align: center">
+![](badreception.png)
+</div>
+
+Analizando los resultados de la validación de hipótesis, observamos que las palabras por si solas no son suficientes para determinar el desempeño de un comentario. Esto se evidencia en los ejemplos anteriores, donde palabras que se esperaría - por su significancia - presenten una fuerte tendencia hacia lo positivo/negativo, resultan más bien con una distribución uniforme.
+
+Luego se valida la hipótesis: El algoritmo utilizado no es el más apto para tratar el dataset dado su naturaleza.
+
+***
+## Experimento 2: Asociar sentimiento a popularidad
+
+La idea es generar un clustering en el cual se pueda observar la relación entre los upvotes y el análisis de sentimiento, que corresponderá a un número.
+
+Para ello, en primer lugar se leerá el archivo de los comentarios usables (en blanco, "deleted" o "removed").
+```{r}
+comments <- read.csv(file="usableComments.csv", 
+                     header = F, stringsAsFactors = FALSE, check.names = FALSE)
+colnames(comments) <- c("text","subreddit","meta","time","author","ups","downs",
+                        "authorlinkkarma","authorcommentkarma","authorisgold")
+```
+
+Después debemos eliminar comentarios duplicados de la base de datos.
+```{r}
+commentsnotduplicated <- unique(comments)
+colnames(commentsnotduplicated) <- c("text","subreddit","meta","time","author","ups","downs",
+                        "authorlinkkarma","authorcommentkarma","authorisgold")
+```
+
+
+Luego, se eliminan las columnas que no nos aportan información útil. Se guardan en 'texts' los textos.
+```{r}
+usefuldatabase <- commentsnotduplicated[c(1,6)]
+texts <- usefuldatabase[,c(1)]
+```
+
+A continuación se cargan las librerías que se utilizarán para el análisis de sentimiento y la visualización.
+```{r, message=FALSE, warning=FALSE}
+library(syuzhet)
+library(lubridate)
+library(ggplot2)
+library(scales)
+library(reshape2)
+library(dplyr)
+```
+
+Se verifica que los textos esten en formato UTF-8, y se calcula el valor de sentimiento que nos entrega la función get_sentiment, la cual funciona con el método "syuzhet".
+```{r}
+convtexts <- iconv(texts, to = "UTF-8")
+sentiments <- get_sentiment(convtexts)
+```
+
+Se crea un dataset que contiene los comentarios y su sentimiento asociado.
+```{r}
+testDataBase <- commentsnotduplicated
+testDataBase$sentiment <- sentiments
+```
+
+Finalmente dejamos únicamente los upvotes y los sentimientos asociados de estos comentarios, para así tener nuestra data que se usará en el clustering. Además se eliminarán los comentarios cuyos upvotes son mayor a 6000 ya que pasan a convertirse en ruido. Los datos se escalan.
+```{r}
+dataForClustering <- testDataBase[,c(6, 11)]
+dataForClustering <- filter(dataForClustering, ups < 6000)
+rescale_dfc <- dataForClustering %>% 
+  mutate(ups_scal = scale(ups), sentiment_scal = scale(sentiment)) %>% 
+  select(-c(ups, sentiment))
+```
+
+Graficamos los datos para ver como se distribuyen.
+```{r fig.width=12}
+plot(rescale_dfc[,1], rescale_dfc[,2], main = "ups_scal vs sentiment_scal", xlab = "ups_scal", ylab = "sentiment_scal")
+```
+
+Para estimar el número de clusters veremos la suma de la diferencia al cuadrado entre los puntos de cada cluster.
+```{r fig.width=12}
+set.seed(1)
+wss <- 0
+clust <- 15  # graficaremos hasta 15 clusters
+for (i in 1:clust){
+  wss[i] <- sum(kmeans(rescale_dfc, centers=i, nstart=20)$withinss)   # <---- se ejecuta kmeans 20 veces y se retorna el de mejor WSS dentro de esos 50
+  
+}
+plot(1:clust, wss, type="b", xlab="Number of clusters", ylab="wss")
+```
+
+En el gráfico anterior no se puede observar un "codo" claro por simple inspección, sin embargo, por tanteo se optó por realizar K-means con k = 3, utilizando 25 iteraciones para finalmente quedarse con el de menor error. Luego se grafica.
+```{r fig.width=12}
+set.seed(2)
+km.out <- kmeans(rescale_dfc, 3, nstart = 25)
+library(ggplot2)
+rescale_dfc$cluster <- factor(km.out$cluster)
+ggplot(rescale_dfc, aes(x=ups_scal, y=sentiment_scal, colour=cluster)) + 
+  geom_point() +
+  labs(x = "ups_scal", y = "sentiment_scal", title = "K-means with K = 3")
+```
+
+
+Finalmente, podemos concluir que la relación entre los upvotes y el valor de sentimiento de un comentario nos indica que en general un comentario cuyo valor de sentimiento es muy positivo (o muy negativo) tenderá a aglomerarse dentro de uno de los clusters con mayor densidad, es decir, será un comentario que no tendrá éxito. Por otro lado, los  comentarios con una cantidad grande de upvotes tienden a ser comentarios cuyo valor de sentimiento es más cercano a 0, es decir son comentarios con un valor de sentimiento "neutro". Esto indica que la gente que utiliza reddit aprecia más un comentario cuyo contenido sea más objetivo que subjetivo. En base a todo lo anterior, validamos una de nuestras hipótesis principales, que es que sí existe un patrón emocional en los comentarios exitosos.
+
+
+***
+
+
+## Experimento 3: Clasificación como detector de tendencias en la red
+
+Este experimento consistió en realizar una extensión del experimento del hito anterior, en donde se realizó clasificación con varios métodos. Para esta instancia fue agregado Naive-Bayes. El código a continuación omite la primera parte que es en donde se importan las librerías y se preparan los clasificadores, manteniendo sólo el código que varía para Naive Bayes e imprime los resultados de dichas métricas. Se optó por correr el código en anakena dado que en las máquinas de los integrantes del grupo no fue capaz de correr por falta de memoria.
+
+```
+classifiers = [c2]
+
+results = {}
+for name, clf in classifiers:
+    metrics = run_classifier(clf, X_train, X_test, y_train, y_test)  # hay que implementarla en el bloque anterior.
+    results[name] = metrics
+    print("----------------")
+    print("Resultados para clasificador: ", name)
+    print("Accuracy promedio:", np.array(metrics['accuracy']).mean())
+    print("Precision promedio:", np.array(metrics['precision']).mean())
+    print("Recall promedio:", np.array(metrics['recall']).mean())
+    print("F1-score promedio:", np.array(metrics['f1-score']).mean())
+    print("----------------\n\n")
+
+```
+
+<div style="text-align: center">
+![](naivebayes.png)
+</div>
+
+Los resultados obtenidos fueron comparados con el Decision Tree, que fue el experimento que obtuvo las mejores métricas en la versión anterior de este experimento, apreciando así que Naive-Bayes mejora un poco los resultados obtenidos por la anterior experimentación. Esto nos demuestra que efectivamente se puede reconocer de qué se está hablando en Reddit. Con este experimento se pudo concluir que, si se considera Reddit como un nicho representativo de Internet, se extiende el resultado anterior y se valida la hipótesis buscada.
+
+***
+
+## Conclusiones 
+
+Si bien aún no se logra construir un patrón garantizado para poder medir el éxito en Reddit, se concluyó que se puede dar un buen coaching para poder realizarlo a futuro. A pesar de no haber obtenido resultados tan satisfactorios como se esperaban, se identificaron lineamientos que pasicionaron el proyecto como un trabajo de factible e interesante profundización. Como cuestión a tener en cuenta estuvieron los recursos con los que se contaron: se aprendió a no sobreestimar los recursos que se necesitarían, puesto que para poder correr Naive-Bayes,por ejmemplo, nuestras máquinas no fueron capaces de hacerlo, pero no se contaba con la opción de tener que correrlos en Anakena.
+Un aprendizaje fundamental que se tuvo, también, fue sobre la importancia de la exploración inicial de datos, en donde se pueden obtener datos relevantes para otras partes que resultan ser más llamativas del proceso de minería de datos.
+
+Es importante no cegarse por un resultado concreto. Para los mismos datos se pudieron obtener distintas salidas y fue importante analizarlos detenidamente antes de poder concluir, para evitar cometer errores. En general, los patrones o grupos que puedan resultar deben ser interpretados con precaución por el usuario.
+
+***
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Hito 2
+
+El documento se ordena de forma tal que primero se muestran los elementos del Hito 2, y luego del Hito 1.
+
+***
+
+## Preguntas de Investigación: ¿Qué hemos decidido para experimentar?
+Después de una ardua discusión como equipo y en consideración de las observaciones realizadas por el equipo docente, así como la retroalimentación de compañeros en Hito 1, se ha definido decantarse por trabajar respondiendo tres preguntas de investigación:
+
+  1. Es posible clasificar a qué metatema debería pertenecer un metatema?
+
+  2. ¿Qué análisis podemos hacer del sentimiento de un comentario?
+  
+  3. ¿Es posible predecir el éxito que tendrá un comentario en Reddit?
+
+Inicialmente se evalua experimentar con otras temáticas, sin embargo dada la naturaleza de los datos se termina optando por decantar en estas tres áreas. La primera responde a la automatización del etiquetado de los temas que se hizo manualmente, mientras que la segunda y la tercera pregunta responden a la idea principal de estudio que se consideraron para el Hito 1, esto es, clasificar el nivel de éxito según distintos enfoques.
+
+***
+
+## Preprocesamiento
+Mientras se realizaban los experimentos, se notó que en dataset con el que se estaba trabajando contenía comentarios duplicados, por lo que se procedió a limpiarlos.
+
+```
+#Leemos el csv generado en el Hito 1 (Comentarios usables)
+comments <- read.csv(file="usableComments.csv",
+header = F, stringsAsFactors = TRUE)
+#Después debemos eliminar comentarios duplicados de la base de datos. Para
+eso usamos unique()
+commentsnotduplicated <-unique(comments)
+#Finalmente exportamos la nueva base de datos a un csv, usando write.csv
+write.csv(commentsnotduplicated,file="commentsnotduplicated.csv",row.names=F
+ALSE, col.names = FALSE)
+```
+
+Esto de igual forma ayuda a sobrellevar el problema identificado al finalizar el Hito 1, esto es, la cantidad de datos con la que se iba a trabajar, pasando de ~2.500.000 a ~100.000, lo que creemos sigue siendo un gran número, pero comparativamente bastante menor.
+
+***
+
+## Experimento 1: Clasificador de metatema con base en comentario. 
+
+En este experimento se pretende calcular cuál es el posible metatema al que corresponde un comentario, dado solo su texto, por medio de *Clasificación* y el algoritmo de *Bag of Words*.
+El experimento se llevó a cabo utilizando Python, como se detalla a continuación:
+
+Se importan las librerías generales y las funciones específicas de los distintos módulos de sklearn, vistos en los laboratorios del curso:
+
+```
+import numpy as np
+import pandas as pd
+import csv
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score, recall_score, precision_score
+from sklearn.datasets import load_breast_cancer
+from sklearn.dummy import DummyClassifier
+from sklearn.svm import SVC  # support vector machine classifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.naive_bayes import GaussianNB  # naive bayes
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.feature_extraction.text import CountVectorizer
+```
+
+
+Se procede a leer el csv. De cada fila se extrae el dato de comentario y meta, para guardarlos en distintos arreglos.
+
+
+```
+comments = []
+META = []
+with open("commentsnotduplicated.csv", "r", encoding="utf8") as data_file:
+    data = csv.reader(data_file)
+    for row in data:
+        com = row[0]
+        met = row[2]
+        comments.append(com)
+        META.append(met)
+``` 
+
+
+Se limpian los datos autogenerados por R
+
+
+```
+comments = comments[1:]
+META = META[1:]
+```
+
+Para verificar la información que se tiene hasta el momento y adquirir mayor grado de manipulación, se crea un dataframe mediante la libreria pandas, de forma tal que contenga el comentario y su META asociado. Se revisa el dataframe mediante la consulta del head.
+
+```
+df = pd.DataFrame({"Comentario": comments,"META": META})
+# print(df[:5])
+``` 
+
+El siguiente objetivo será crear una Bag of Words para cada comentario: Para ello se importa countVectorizer de sklearn, librería que realiza dicho trabajo, y se procede a configurar un vectorizador según los parámetros de interés_
+
+
+```
+vectorizer = CountVectorizer(analyzer="word", tokenizer=None, preprocessor=None,
+                             stop_words='english', decode_error='ignore', lowercase='False')
+```
+
+Donde se ha indicado que se debe analizar palabra a palabra (y no carácter a
+carácter), se especifica un diccionario de stop_words del inglés precargado, y además se indica que no es necesario realizar ninguna conversión a minúsculas pues ya se tiene ese procesamiento hecho. También se indica que, en caso de encontrar un error de decoding, este debe ignorarse. Luego se crean las variables de interés X e y para entregárselas al clasificador, donde X corresponde a transformar en vector cada comentario del dataframe, e y a las etiquetas META que harán de objetivo
+
+```
+text=df["Comentario"].values
+X = vectorizer.fit_transform(text)
+y = df["META"].values
+```
+Se definen los conjuntos de entrenamiento y prueba como sigue, en donde se utiliza el 30 porciento de los datos como datos de prueba y el resto como datos de entrenamiento.
+
+```
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=.30)
+```
+Ahora se implementa la función run_classifier vista en el laboratorio, con un número de test igual a 40:
+
+```
+def run_classifier(clf, X_train, X_test, y_train, y_test, num_tests=40):
+    metrics = {'f1-score': [], 'precision': [], 'recall': []}
+
+    for _ in range(num_tests):
+        clf.fit(X_train, y_train)
+        predictions = clf.predict(X_test)
+
+        metrics['y_pred'] = predictions
+        metrics['y_prob'] = clf.predict_proba(X_test)[:, 1]
+        metrics['f1-score'].append(f1_score(y_test, predictions, average='weighted'))
+        metrics['recall'].append(recall_score(y_test, predictions, average='weighted'))
+        metrics['precision'].append(precision_score(y_test, predictions, average='weighted'))
+
+    return metrics
+```
+La función fue procesada en un MacBook Air de 2018 con 8GB de ram, tardando 3 horas con 20 minutos para los clasificadores Base Dummy, DecisionTree y KNN con n_neighbors=500.
+
+Vale la pena notar que las métricas se calculan con average=‘weightedʼ en lugar de ‘microʼ. Esto se debe a que, si se puede despreciar el desbalance de los datos por la cantidad de estos, no deja de ser una aproximación gruesa, problema resultante en métricas idénticas en caso de usar ‘microʼ (pues la precisión se vuelve algebraicamente equivalente a la exactitud). Al usar ‘weightedʼ disminuimos en gran medida este problema, pues la contribución de cada clase al promedio es “ponderada” por el número de ejemplos relativos de la misma. Luego lo que se tiene es una solución al problema de datos desbalanceados, cuando el balance no es de un orden excesivo.
+
+A continuación, se configuran los distintos clasificadores a utilizar y se genera el output mediante un ciclo sobre el arreglo de clasificadores, de la misma forma que se trabajó en el laboratorio:
+
+```
+c0 = ("Base Dummy", DummyClassifier(strategy='stratified'))
+c1 = ("Decision Tree", DecisionTreeClassifier())
+c2 = ("Gaussian Naive Bayes", GaussianNB())
+c3 = ("KNN", KNeighborsClassifier(n_neighbors=500))
+
+classifiers = [c0, c1, c3]
+
+results = {}
+for name, clf in classifiers:
+    metrics = run_classifier(clf, X_train, X_test, y_train, y_test)  # hay que implementarla en el bloque anterior.
+    results[name] = metrics
+    print("----------------")
+    print("Resultados para clasificador: ", name)
+    print("Precision promedio:", np.array(metrics['precision']).mean())
+    print("Recall promedio:", np.array(metrics['recall']).mean())
+    print("F1-score promedio:", np.array(metrics['f1-score']).mean())
+    print("----------------\n\n")
+```
+
+Del experimento se obtuvieron los siguientes resultados:
+
+<div style="text-align: center">
+![](resultados1.png)
+</div>
+
+
+De aquí se puede notar los malos resultados obtenidos por KNN y Base Dummy. Sin embargo, Decision Tree obtiene resultados bastante aceptables, lo que nos da un buen indicio sobre cuál el clasificador adecuado para esta tarea.
+***
+
+## Experimento 2: Análisis de Sentimiento
+
+La idea es generar un clustering en el cual se pueda observar la relación entre los upvotes y el análisis de sentimiento, que corresponderá a un número.
+
+Para ello, en primer lugar se leerá el archivo de los comentarios usables (en blanco, "deleted" o "removed").
+```{r}
+comments <- read.csv(file="usableComments.csv", 
+                     header = F, stringsAsFactors = FALSE, check.names = FALSE)
+colnames(comments) <- c("text","subreddit","meta","time","author","ups","downs",
+                        "authorlinkkarma","authorcommentkarma","authorisgold")
+```
+
+Después debemos eliminar comentarios duplicados de la base de datos.
+```{r}
+commentsnotduplicated <- unique(comments)
+colnames(commentsnotduplicated) <- c("text","subreddit","meta","time","author","ups","downs",
+                        "authorlinkkarma","authorcommentkarma","authorisgold")
+```
+
+
+Luego, se eliminan las columnas que no nos aportan información útil. Se guardan en 'texts' los textos.
+```{r}
+usefuldatabase <- commentsnotduplicated[c(1,6)]
+texts <- usefuldatabase[,c(1)]
+```
+
+A continuación se cargan las librerías que se utilizarán para el análisis de sentimiento y la visualización.
+```{r, message=FALSE, warning=FALSE}
+library(syuzhet)
+library(lubridate)
+library(ggplot2)
+library(scales)
+library(reshape2)
+library(dplyr)
+```
+
+Se verifica que los textos esten en formato UTF-8, y se calcula el valor de sentimiento que nos entrega la función get_sentiment, la cual funciona con el método "syuzhet".
+```{r}
+convtexts <- iconv(texts, to = "UTF-8")
+sentiments <- get_sentiment(convtexts)
+```
+
+Se crea un dataset que contiene los comentarios y su sentimiento asociado.
+```{r}
+testDataBase <- commentsnotduplicated
+testDataBase$sentiment <- sentiments
+```
+
+Finalmente dejamos únicamente los upvotes y los sentimientos asociados de estos comentarios, para así tener nuestra data que se usará en el clustering. Además se eliminarán los comentarios cuyos upvotes son mayor a 6000 ya que pasan a convertirse en ruido. Los datos se escalan.
+```{r}
+dataForClustering <- testDataBase[,c(6, 11)]
+dataForClustering <- filter(dataForClustering, ups < 6000)
+rescale_dfc <- dataForClustering %>% 
+  mutate(ups_scal = scale(ups), sentiment_scal = scale(sentiment)) %>% 
+  select(-c(ups, sentiment))
+```
+
+Graficamos los datos para ver como se distribuyen.
+```{r fig.width=12}
+plot(rescale_dfc[,1], rescale_dfc[,2], main = "ups_scal vs sentiment_scal", xlab = "ups_scal", ylab = "sentiment_scal")
+```
+
+Para estimar el número de clusters veremos la suma de la diferencia al cuadrado entre los puntos de cada cluster.
+```{r fig.width=12}
+set.seed(1)
+wss <- 0
+clust <- 15  # graficaremos hasta 15 clusters
+for (i in 1:clust){
+  wss[i] <- sum(kmeans(rescale_dfc, centers=i, nstart=20)$withinss)   # <---- se ejecuta kmeans 20 veces y se retorna el de mejor WSS dentro de esos 50
+  
+}
+plot(1:clust, wss, type="b", xlab="Number of clusters", ylab="wss")
+```
+
+En el gráfico anterior no se puede observar un "codo" claro por simple inspección, sin embargo, por tanteo se optó por realizar K-means con k = 3, utilizando 25 iteraciones para finalmente quedarse con el de menor error. Luego se grafica.
+```{r fig.width=12}
+set.seed(2)
+km.out <- kmeans(rescale_dfc, 3, nstart = 25)
+library(ggplot2)
+rescale_dfc$cluster <- factor(km.out$cluster)
+ggplot(rescale_dfc, aes(x=ups_scal, y=sentiment_scal, colour=cluster)) + 
+  geom_point() +
+  labs(x = "ups_scal", y = "sentiment_scal", title = "K-means with K = 3")
+```
+
+
+Finalmente, podemos concluir que la relación entre los upvotes y el valor de sentimiento de un comentario nos indica que en general un comentario cuyo valor de sentimiento es muy positivo (o muy negativo) tenderá a aglomerarse dentro de uno de los clusters con mayor densidad, es decir, será un comentario que no tendrá éxito. Por otro lado, los  comentarios con una cantidad grande de upvotes tienden a ser comentarios cuyo valor de sentimiento es más cercano a 0, es decir son comentarios con un valor de sentimiento "neutro". Esto indica que la gente que utiliza reddit aprecia más un comentario cuyo contenido sea más objetivo que subjetivo.
+
+
+***
+
+## Experimento 3: Predicción de upvotes que tendrá un comentario con base en su texto.
+
+Este experimento se realizó de una forma muy similar a la del experimento 1, pero en vez de calcular para un metatema, se calculó el valor de upvotes que tendría un comentario dado su texto. Para esto también se realizó Bag of Words y clasificación. Se realizaron dos subexperimentos: el primero tomando todos los rangos de valores que puede tomar un comentario, en un intervalo entre -15 y 89, y el segundo clasificándolos en rangos, [0-5], [5-10], [10-15], [15-20], [20-40], [40-inf]. Se midieron las métricas principales y el error se calculó mediante MSE.
+
+Se importan las librerías importantes:
+```
+import pandas as pd
+
+from sklearn.feature_extraction.text import CountVectorizer
+
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score, mean_squared_error
+from sklearn.dummy import DummyClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.naive_bayes import GaussianNB  # naive bayes
+from sklearn.neighbors import KNeighborsClassifier
+import numpy as np
+```
+
+Se importan los datos y se separan los rangos por la clase a predecir:
+
+```
+df = pd.read_csv("DB/usableCommentsFixFull.csv", usecols = [0,5], header=None, names=["text", "votes"])
+df = df.drop_duplicates(keep='first')
+
+df.loc[df['votes'] < 5, 'votes'] = 0
+df.loc[(df['votes'] >= 5) & (df['votes'] < 10), 'votes'] = 1
+df.loc[(df['votes'] >= 10) & (df['votes'] < 15), 'votes'] = 2
+df.loc[(df['votes'] >= 15) & (df['votes'] < 20), 'votes'] = 3
+df.loc[(df['votes'] >= 20) & (df['votes'] < 40), 'votes'] = 4
+df.loc[df['votes'] >= 40, 'votes'] = 10
+
+text = df["text"].values #input data
+votes = df["votes"].values #target data
+```
+
+Se crea la bag of words 
+```
+vectorizer = CountVectorizer(analyzer = "word", tokenizer = None, preprocessor = None,
+                             stop_words = 'english', decode_error='strict',lowercase='False')
+```
+
+Ahora se crean los conjuntos de entrenamiento, se crea la función para correr los clasificadores y los clasificadores y se entregan los resultados.
+```
+train_data_features = vectorizer.fit_transform(text)
+X = train_data_features.toarray()
+y = votes
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=.30)
+
+def run_classifier(clf, X_train, X_test, y_train, y_test, num_tests=10):
+    metrics = {'f1-score': [], 'precision': [], 'recall': [], 'accuracy': [], 'mse': []}
+
+    for _ in range(num_tests):
+        clf.fit(X_train, y_train)
+        y_pred = clf.predict(X_test)
+
+        metrics['y_pred'] = y_pred
+        metrics['y_prob'] = clf.predict_proba(X_test)[:, 1]
+        metrics['accuracy'].append(accuracy_score(y_test, y_pred))
+        metrics['mse'].append(mean_squared_error(y_test, y_pred))
+        metrics['f1-score'].append(f1_score(y_test, y_pred,
+                                            average='weighted'))
+        metrics['recall'].append(recall_score(y_test, y_pred,
+                                            average='weighted'))
+        metrics['precision'].append(precision_score(y_test, y_pred,
+                                            average='weighted'))
+        return metrics
+
+c0 = ("Base Dummy", DummyClassifier(strategy='stratified'))
+c1 = ("Decision Tree", DecisionTreeClassifier())
+c2 = ("Gaussian Naive Bayes", GaussianNB())
+c3 = ("KNN", KNeighborsClassifier(n_neighbors=5))
+
+classifiers = [c0,c1,c2,c3]
+
+results = {}
+for name, clf in classifiers:
+    metrics = run_classifier(clf, X_train, X_test, y_train, y_test)  # hay que implementarla en el bloque anterior.
+    results[name] = metrics
+    print("----------------")
+    print("Resultados para clasificador: ", name)
+    print("Accuracy promedio:", np.array(metrics['accuracy']).mean())
+    print("Error promedio:", np.array(metrics['mse']).mean())
+    print("Precision promedio:", np.array(metrics['precision']).mean())
+    print("Recall promedio:", np.array(metrics['recall']).mean())
+    print("F1-score promedio:", np.array(metrics['f1-score']).mean())
+    print("----------------\n\n")
+```
+
+A continuación se presentan los resultados para el subexperimento 1, en donde buscábamos clasificar los valores en todo el rango:
+
+<div style="text-align: center">
+![](se1.png)
+</div>
+
+
+Ahora, se presentan los resultados del subexperimento 2, en donde clasificábamos en los rangos anteriormente comentados:
+
+<div style="text-align: center">
+![](se2.png)
+</div>
+
+
+En primer lugar se observa que el primer subexperimento posee muy bajas metricas, se cree que es porque el espacio al que se quiere llegar en la prediccion es muy grande (mas de 100 valores distintos), en cambio en el segundo experimento eso se reduce a solo 6 valores posibles, mejorando el rendimiento de todos los clasificadores considerablemente.
+En ambos experimentos se observa que KNN desempeña mejor que el resto, en casi todas las metricas. Una hipótesis es que por la naturaleza de KNN se llega a que comentarios similares, o que usan palabras similares terminan con puntuaciones cercanas, lo que beneficia el uso de este modelo.
+***
+
+## Conclusiones 
+
+Distintas observaciones se pueden extraer de los resultados obtenidos. Por un lado, se observa que para la tercera pregunta planteada (karma en función de comentario), quizás no resulta conveniente utilizar los algoritmos de clasificación usados puesto que se tiene un rango muy amplio de valores objetivo (rango discreto más muy grande). Por ello, de cara al Hito 3 se buscará mejorar el resultado mediante otras técnicas que estén desarrolladas para situaciones como esta, como lo es la *regresión lineal*.
+Del experimento 2, se logra identificar la existencia de una estrecha relación entre el éxito y sentimiento de un comentario. Esto abre un lineamiento de trabajo para el Hito 3, en donde se buscará profundizar en este fenómeno.
+
+Algunas aseveraciones que se pueden extraer del trabajo realizado y sus resultados son:
+-Existe una estrecha relación entre el sentimiento de un comentario y el valor de karma asociado.
+-Las etiquetas META se pueden predecir mediante clasificadores con una baja probabilidad de error.
+-Clasificar el grado de karma que tendrá un comentario únicamente en base a su texto plano es poco factible con los modelos trabajados, sin embargo, otras técnicas podrían dar mejores resultados (por recomendación, para el Hito 3 se evaluará repetir el experimento utilizando esta vez regresión lineal).
+Para los experimentos 1 y 2 se logró distinguir cual era el mejor modelo, mediante la comparación en prueba y error. Esto abre paso a nuevas afirmaciones:
+-Para clasificar las etiquetas META, conviene usar árboles de decisión.
+-Para la creación de clusters que respondan a la relación sentimiento-karma, un buen número de clusters es 3.
+
+Todo lo anterior marca una dirección de trabajo para el futuro hacia entrar a profundizar el estudio de fenómenos interesantes como la relación karma-sentimiento, lo que puede fortalecer las aseveraciones anteriormente planteadas en cuanto se escojan apropiadamente las herramientas a utilizar.
+
+## Problemas Encontrados
+
+Los principales problemas que surgieron en este Hito fueron, en primer lugar, notar la gran cantidad de comentarios duplicados que existían en el dataset (que no se vio en el Hito 1) y *decidir cómo se filtrarían*, así como la *dimensionalidad del diccionario* generado en los experimentos que utilizarían Bag Of Word, y su compatibilidad con modelos más pesados en memoria como Naive Bayes. Por otro lado, otro problema surgió en *la elección de modelos* a utilizar para cada experimento, especialmente con la predicción de karma. Sin embargo, esto *se convirtió en un beneficio*, pues la solución encontrada fue llevar a cabo cada experimento con distintos modelos, lo que amplió el entendimiento de cada uno y ofreció la oportunidad de comparar distintos resultados, de forma tal que se distinguiese que modelo era el mas conveniente para cada experimento. Esto será de gran utilidad para enfocar de mejor forma el trabajo futuro (Hito 3).
+
+Cabe mencionar que, si se hubiera contado con una capacidad más reducida de memoria, no habría sido posible realizar experimentación con distintos modelos y/o prueba y error. Esto nos lleva a reflexionar sobre lo importante que es el desarrollo tecnológico para la minería de datos, lo que justifica su aparición como una ciencia relativamente nueva.
+
+***
+***
+***
+
+# Hito 1
+
+## Introducción: ¿Qué es Reddit?
+Reddit se define como un "agregador de contenido determinado por la comunidad". Habiendo alcanzado el puesto de **sexto sitio más visitado en el mundo** a inicios del 2018 (lugar que mantiene actualmente en Estados Unidos) y luchando desde la posición 21 en el ranking mundial actual (Fuente: [Alexa (Amazon)](https://www.alexa.com/topsites/countries/US)), la plataforma creada por Steve Huffman y Alexis Ohanian se autodefine como "The front page of the internet". Y no es para menos, para un sitio que pasa los 330 millones mensuales de usuarios activos (Fuente: [Reddit by the numbers (Reddit)](https://www.redditinc.com/press)).
+
+Dicho sitio ofrece un feed personalizado según las **publicaciones mas populares** de un **tema de interés para el usuario**, además de la posibilidad de crear **sub-comunidades** con sus propios conjuntos de reglas y contenidos (llamadas Reddits) y evaluar las publicaciones mediante _up-vote_ y _down-vote_, según lo cual se define la popularidad (llamada *karma* de una publicación.)
+
+Una de las características esenciales de Reddit tiene que ver con el anonimato: Para registrarse solo basta proporcionar un correo y un nombre de usuario. Esta característica se presenta como una ventaja para los usuarios que, sin embargo, dificulta el levantamiento de algunos datos, especialmente demográficos. Aún así, es altamente bienvenido por la comunidad. 
+
+Otro concepto importante de Reddit es la posibilidad de un usuario de **ser Reddit Oro**, condición pagada que habilita ciertas _funciones premium_ como desactivar los anuncios o participar de subreddits _vip_, además de la posibilidad de **regalar oro a otros usuarios** como retribución por un buen post o comentario notable.
+
+
+<div style="text-align: right">
+![](front-pg.png)
+</div>
+***
+
+## Motivación 
+La idea de analizar el dataset de reddit nace por la posibilidad de analizar los comportamientos, patrones e intereses de las personas a través de internet **cuando se tiene la posibilidad de mantener el anonimato**, así como de generar nociones sobre lo que denominaremos **patrones de popularidad**: todos aquellas características que incidan en que una publicación se haga popular, tanto propias de la publicación, como aquellos aspectos relacionados con el contexto social cibernético en el que se presenten: reddit, usuario que publica y su karma asociado, etc.
+
+De esta forma, algunas ideas iniciales son:
+-Identificar patrones relacionados con la repetición de palabras, que permitan identificar tendencias
+
+-Asociación de comentarios bajo una idea principal y distinción en base a up/down-votes: ¿Por qué este comentario recibe más aceptación que su par, si comparten la misma idea general?.
+
+-¿En que horarios la actividad es mayor para cada meta?
+
+-Relación gold-karma
+
+-**¿Tendrá éxito este post?** (Abstracción de data)
+
+
+
+***
+
+## Contexto del dataset
+-El dataset a trabajar contiene datos de todos los comentarios en los sub-reddits más relevantes de la plataforma desde el 24 de abril del 2014 al 17 de febrero del 2016 (Véase Obs. 1). Se presenta en formato de Coma Separated Values (.csv, véase Obs. 2), tras un trabajo de normalización del texto a minúsculas y etiquetado bajo **meta-temas** por Linan Qiu, Computer Scientist de la Universidad de Columbia, New York ([MIT License](https://github.com/linanqiu/reddit-dataset)). El dataset es público y se encuentra almacenado en [mega.nz](https://mega.nz/#F!NtsCGTgD!urXdXLJ6yITYdWEdWN-H1w) con un tamaño comprimido de 681.5 MB.
+
+-Dicho dataset contiene 2.726.000 comentarios (filas).
+
+-Para cada comentario, se tienen los siguientes atributos: **text, id, subreddit, meta, time, author, ups, downs, authorlinkkarma, authorcommentkarma, authorisgold**. Estos se relacionan con las siguientes características asociadas a un comentario: 
+
+  1. text: Texto del comentario
+  
+  2. id: ID única del comentario
+  
+  3. subreddit: subreddit del hilo al que pertenece
+  
+  4. meta: "super tag" asignado al subreddit del hilo al que pertenece. No es propio de reddit.
+  
+  5. time: _Unix timestamp_ del hilo
+  
+  6. author: nombre de usuario del autor del comentario
+  
+  7. ups: numero de upvotes recibidos
+  
+  8. downs: numero de downvotes recibidos
+  
+  9. authorlinkkarma: karma total de los posts del usuario
+  
+  10. authorcommentkarma: karma total de los comentarios del usuario
+  
+  11. authorisgold: boolean que indica 1 si el autor es oro, 0 si no.
+  
+  _Obs. 1:  Las fechas de inicio y término del recogimiento de datos fueron obtenidas mediante la conversión de tiempo en Unix, según el programa tiempo.py a especificar en las siguientes categorías._
+  
+  _Obs. 2: Debido al formato en que se presentan y por la versátilidad que este lenguaje de programación ofrece, se trabajará con Python 3. De esta forma, la mayoría de los programas a presentar depende de la librería **csv**, incorporada en Python._
+  
+***
+
+## Procesamiento previo
+Se busca inicialmente identificar los comentarios **"usables"**, entendiendo por ello aquellos cuyo mensaje es no vacío, no corresponden a un "deleted" ni a un "removed". Esto se realiza mediante el siguiente programa: **MakeUsableComments.py**
+```
+import csv
+
+with open("comments.csv", "r", encoding="utf8") as data_file:
+    data = csv.reader(data_file) #.DictReader(data_file) CONVERTS FROM CSV TO PYTHON
+    with open("usableComments.csv", "w", encoding="utf8") as write_file:
+        Writer = csv.writer(write_file, lineterminator = "\n")
+        for row in data:
+            if row[0] != "" and row[0] != "[ deleted ]" and row[0] != "[ removed ]":
+                row.pop(1) # eliminar columna ID
+                Writer.writerow(row)
+        write_file.close()
+    data_file.close()
+```
+Cabe observar que el programa genera un documento nuevo, manteniendo el original como respaldo.
+
+
+Los resultados son los siguientes: 
+
+-2.726.000 comentarios originales
+
+-184.261 comentarios en blanco 
+
+**-2.541.739 comentarios usables.**
+
+***
+## Levantamiento de información
+
+**1. Transformación del tiempo:**
+
+Al presentarse el atributo tiempo en formato Unix, resulta necesario convertirlo para tener información sobre las fechas de publicación de las entradas (en particular, para la primera y última). Para ello se construye en primer lugar un módulo de python que entregue la Unix timeStamp buscada, haciendo uso de la linealidad de la conversión a Unix y de las librerías [panda](https://pandas.pydata.org) y [numpy](http://www.numpy.org) (ambas con licencia [NumFOCUS OpenCode](https://numfocus.org)) para luego realizar la conversión mediante la plataforma virtual [Unix TimeStamp](https://www.unixtimestamp.com). El programa es el siguiente: **dataTime.py**
+
+```
+import pandas as pd
+import numpy as np
+
+# Usando pandas, se importa el Dataset
+df = pd.read_csv("usableCommentsFull.csv",
+                 names = ["text", "subreddit", "meta", "time", "author",
+                          "ups", "downs", "authorlinkkarma", "authorcommentkarma", "authorisgold"])
+
+# la cuarta columna contiene los tiempos en formato UNIX, para obtener minimo y máximo hacemos lo siguiente:
+
+ time = df.iloc[:,3]
+ mintime = time.min()
+ maxtime = time.max()
+ #mintime y maxtime se convierten a fecha DD/MM/AAAA mediante https://www.unixtimestamp.com
+```
+
+Los resultados, ya mencionados anteriormente, indican que el primer comentario registrado en el dataset corresponde al 24 de abril del 2014, mientras que el último al 17 de febrero de 2016, es decir, pleno periodo de crecimiento y apogeo de la plataforma.
+
+**2. Meta-temas:**
+
+Se busca utilizar la ya elaborada etiqueta de meta-temas para generar una noción de la caracterización de los comentarios según la cantidad de entradas correspondientes a cada etiqueta. Esto se realiza mediante el programa **countMetas.py**
+
+```
+import csv
+import numpy as np
+import matplotlib.pyplot as plt
+
+metas = ["news", "lifestyle", "learning", "humor", "entertainment", "television", "gaming"]
+metaCount = [0, 0, 0, 0, 0, 0, 0]
+
+with open("DB/usableCommentsFull.csv", "r", encoding="utf8") as data_file:
+    data = csv.reader(data_file)
+    for row in data: #each row is a comment
+        meta = row[2]
+        metaCount[metas.index(meta)] += 1
+
+plt.bar(metas, metaCount)
+
+plt.show()
+```
+
+El resultado es el siguiente: 
+
+<div style="text-align: right">
+![](meta.png)
+</div>
+
+Se observa una distribución aproximadamente igualitaria de las etiquetas, salvo por _gaming_, que sobresale sobre sus pares superando los 50.000 comentarios.
+
+**3.Palabras por comentario:**
+
+
+Resulta de interés también conocer estadísticas sobre el largo en palabras de los comentarios, tales como el promedio, desviación estándar, máximo y mínimo. Esto se logra mediante **countWords.py**
+
+```
+import csv
+import numpy as np
+from nltk.tokenize import RegexpTokenizer
+import matplotlib.pyplot as plt
+
+tokenizer = RegexpTokenizer(r'\w+')
+
+commentLength = []
+
+with open("usableComments2.csv", "r", encoding="utf8") as data_file:
+    data = csv.reader(data_file)
+    for row in data: #each row is a comment
+        words = tokenizer.tokenize(row[0])
+        lenCom = len(words)
+        if lenCom < 350: # eliminar los outliers
+            commentLength.append(lenCom)
+
+bins = range(0, np.max(commentLength), 10)
+plt.hist(commentLength, bins)
+plt.text(250,600000,"Median: " + str(int(np.median(commentLength))))
+plt.text(250,550000,"Mean: " + str(int(np.mean(commentLength))))
+plt.text(250,500000,"STD: " + str(int(np.std(commentLength))))
+plt.text(250,450000,"Max: " + str(int(np.max(commentLength))))
+plt.text(250,400000,"Min: " + str(int(np.min(commentLength))))
+
+plt.show()
+```
+Obteniéndose el siguiente resultado:
+<div style="text-align: right">
+![](palabrasxcoment.png)
+</div>
+Llama particularmente la atención el resultado para el mínimo largo de palabras, pues el valor obtenido (0) no debiese estar presente tomando en consideración que los strings vacíos fueron quitados en el pre-procesamiento. Esto resultó fundamental para la comprensión de nuestros datos, pues al analizar los comentarios cuyo orden de palabras era 0 más no eran descartados, se notó la posibilidad de que un comentario correspondiese a carácteres no unicode-utf8 (o emojis).
+
+**4. Karma por comentario**
+
+Otra característica de interés es la cantidad de Karma recibida por comentario, de las cuales se obtienen estadísticas mediante **countUpvotes.py**:
+
+```
+import csv
+import numpy as np
+import matplotlib.pyplot as plt
+
+upvotes = []
+
+with open("DB/usableCommentsFull.csv", "r", encoding="utf8") as data_file:
+    data = csv.reader(data_file)
+    for row in data: #each row is a comment
+        up = int(row[5]) # index 5 is column: upvotes
+        if up < 90 and up > -16:
+            upvotes.append(up)
+
+bins = range(np.min(upvotes), np.max(upvotes), 5)
+plt.hist(upvotes, bins)
+plt.text(60,1400000,"Median: " + str(int(np.median(upvotes))))
+plt.text(60,1300000,"Mean: " + str(int(np.mean(upvotes))))
+plt.text(60,1200000,"STD: " + str(int(np.std(upvotes))))
+plt.text(60,1100000,"Max: " + str(int(np.max(upvotes))))
+plt.text(60,1000000,"Min: " + str(int(np.min(upvotes))))
+
+plt.show()
+```
+
+El resultado es el siguiente:
+<div style="text-align: right">
+![](palabrasxcoment.png)
+</div>
+Se observa de inmediato que la mayor parte de los comentarios reciben entre 0 y 20 upvotes, dominando especialmente los numeros levemente mayores a 0. Estableciendo restricciones sobre el plot para tener una visión más descriptiva de los datos fuera de dicha región, se obtiene:
+
+<div style="text-align: right">
+![](palabrasxxcoment.png)
+</div>
+
+Finalmente se busca una noción del tiempo transcurrido entre cada entrada. Para ello se desarrolla el módulo **time.py**:
+
+```
+import pandas as pd
+import numpy as np
+
+# Usando pandas, se importa el Dataset
+df = pd.read_csv("usableCommentsFull.csv",
+                 names = ["text", "subreddit", "meta", "time", "author",
+                          "ups", "downs", "authorlinkkarma", "authorcommentkarma", "authorisgold"])
+
+
+time.sort() # Ordenamos las horas de forma creciente
+differences = []
+# se calcula la diferencia de tiempos entre cada comentario inmediato
+for i in range(len(time) - 1):
+    differences.append(time[i+1] - time[i])
+vector = np.array(differences)
+promedio = np.mean(vector)
+
+
+```
+
+Los resultados indican que, para los subreddits con los que se esta trabajando (**más relevantes**), se genera un comentario nuevo cada 21.75 segundos, es decir, 11 comentarios en temas relevantes cada 4 minutos, aproximadamente. 
+
+De la mano con el resultado anterior, surge interés por conocer cada cuanto tiempo se generaría un **comentario relevante** en dichos reddits. Para ello, se modifica el programa para que considere aquellos comentarios con una cantidad de upvotes igual o mayor a 40:
+
+```
+import pandas as pd
+import numpy as np
+
+# Usando pandas, se importa el Dataset
+df = pd.read_csv("usableCommentsFull.csv",
+                 names = ["text", "subreddit", "meta", "time", "author",
+                          "ups", "downs", "authorlinkkarma", "authorcommentkarma", "authorisgold"])
+filter_df = df[df['ups'] >=40]
+
+time = list(filter_df.iloc[:,3])
+mintime = time.min()
+maxtime = time.max()
+```
+
+Con lo cual el resultado indica que se genera un comentario relevante cada 4.5 minutos.
+
+## Problemas encontrados
+La principal problemática reside en la gran cantidad de datos con las que se está trabajando, especialmente cuando se busca levantar información sobre el texto mismo del comentario (pues al poder alcanzar los 2000 carácteres, el volumen final resulta considerablemente alto según el procesamiento que se desee realizar). De esta forma, procesamientos del tipo _char a char_ resultan infactibles para los recursos computacionales con los que el equipo cuenta, más para la parte de exploración se logra adaptar el trabajo de forma tal que esta situación no imposibilite el progreso. Se deberá tener en cuenta para los próximos hitos.
+</div>
+
+
+

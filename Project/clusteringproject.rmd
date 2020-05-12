@@ -1,0 +1,86 @@
+# Clustering
+
+La idea es generar un clustering en el cual se pueda observar la relación entre los upvotes y el análisis de sentimiento, que será al fin y al cabo un número.
+
+Primero, se leerá el archivo de los comentarios usables (en blanco, "deleted" o "removed").
+```{r}
+comments <- read.csv(file="D:\\Documentos\\IntroductionToDataMining\\usableComments.csv", 
+                     header = F, stringsAsFactors = FALSE, check.names = FALSE)
+colnames(comments) <- c("text","subreddit","meta","time","author","ups","downs",
+                        "authorlinkkarma","authorcommentkarma","authorisgold")
+```
+
+Después debemos eliminar comentarios duplicados de la base de datos.
+```{r}
+commentsnotduplicated <- unique(comments)
+colnames(commentsnotduplicated) <- c("text","subreddit","meta","time","author","ups","downs",
+                        "authorlinkkarma","authorcommentkarma","authorisgold")
+```
+
+
+Luego, se eliminan las columnas que no nos aportan información útil. Se guardan en 'texts' los textos.
+```{r}
+usefuldatabase <- commentsnotduplicated[c(1,6)]
+texts <- usefuldatabase[,c(1)]
+```
+
+A continuación se cargan las librerías que se utilizarán para el análisis de sentimiento y la visualización.
+```{r}
+library(syuzhet)
+library(lubridate)
+library(ggplot2)
+library(scales)
+library(reshape2)
+library(dplyr)
+```
+
+Nos aseguramos que los textos esten en formato UTF-8, y se calcula el valor de sentimiento que nos entrega la función get_sentiment, la cual funciona con el método "syuzhet".
+```{r}
+convtexts <- iconv(texts, to = "UTF-8")
+sentiments <- get_sentiment(convtexts)
+```
+
+Se crea un dataset que contiene los comentarios y su sentimiento asociado.
+```{r}
+testDataBase <- commentsnotduplicated
+testDataBase$sentiment <- sentiments
+```
+
+Finalmente dejamos únicamente los upvotes y los sentimientos asociados de estos comentarios, para así tener nuestra data que se usará en el clustering. Además se eliminarán los comentarios cuyos upvotes son mayor a 6000 ya que pasan a convertirse en ruido. Los datos se escalan.
+```{r}
+dataForClustering <- testDataBase[,c(6, 11)]
+dataForClustering <- filter(dataForClustering, ups < 6000)
+rescale_dfc <- dataForClustering %>% 
+  mutate(ups_scal = scale(ups), sentiment_scal = scale(sentiment)) %>% 
+  select(-c(ups, sentiment))
+```
+
+Graficamos los datos para ver como se distribuyen.
+```{r fig.width=12}
+plot(rescale_dfc[,1], rescale_dfc[,2], main = "ups_scal vs sentiment_scal", xlab = "ups_scal", ylab = "sentiment_scal")
+```
+
+Para estimar el número de clusters veremos la suma de la diferencia al cuadrado entre los puntos de cada cluster.
+```{r fig.width=12}
+set.seed(1)
+wss <- 0
+clust <- 15  # graficaremos hasta 15 clusters
+for (i in 1:clust){
+  wss[i] <- sum(kmeans(rescale_dfc, centers=i, nstart=20)$withinss)   # <---- se ejecuta kmeans 20 veces y se retorna el de mejor WSS dentro de esos 50
+  
+}
+plot(1:clust, wss, type="b", xlab="Number of clusters", ylab="wss")
+```
+
+En el gráfico anterior no se puede observar un "codo", por lo que se optó simplemente por realizar K-means con k = 3, con 25 iteraciones para finalmente quedarse con el de menor error. Luego se grafica.
+```{r fig.width=12}
+set.seed(2)
+km.out <- kmeans(rescale_dfc, 3, nstart = 25)
+library(ggplot2)
+rescale_dfc$cluster <- factor(km.out$cluster)
+ggplot(rescale_dfc, aes(x=ups_scal, y=sentiment_scal, colour=cluster)) + 
+  geom_point() +
+  labs(x = "ups_scal", y = "sentiment_scal", title = "K-means with K = 3")
+```
+
+Finalmente, podemos concluir que la relación entre los upvotes y el valor de sentimiento de un comentario nos indica que en general un comentario cuyo valor de sentimiento es muy positivo (o muy negativo) tenderá a aglomerarse dentro de uno de los clusters con mayor densidad, es decir, será un comentario que no tendrá éxito. Por otro lado, los  comentarios con una cantidad grande de upvotes tienden a ser comentarios cuyo valor de sentimiento es más cercano a 0, es decir son comentarios con un valor de sentimiento "neutro". Esto indica que la gente que utiliza reddit aprecia más un comentario cuyo contenido sea más objetivo que subjetivo.
