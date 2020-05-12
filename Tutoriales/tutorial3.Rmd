@@ -1,0 +1,315 @@
+---
+title: "Tutorial 3: Clustering en R"
+author: "Bárbara Poblete, Felipe Bravo, Juglar Díaz, Mauricio Quezada, Hernán Sarmiento"
+date: "Mayo 2019"
+output: 
+  html_document: 
+    theme: cosmo
+    toc: yes
+---
+
+# Preliminar
+
+Para las dos sesiones del lab 3 usaremos **R**. Recuerde que debe subir la versión HTML de este tutorial en U-Cursos.
+
+Instale los siguientes paquetes para el desarrollo del tutorial y del lab:
+
+```{r, eval=F}
+install.packages("ggplot2")
+install.packages("GGally")
+install.packages("dbscan")
+install.packages("cluster")
+install.packages("seriation")
+install.packages("fpc")
+```
+
+Adicionalmente, descargue los siguientes datasets que son los que usaremos en las sesiones:
+
+* https://users.dcc.uchile.cl/~hsarmien/mineria/datasets/d31.txt
+* https://users.dcc.uchile.cl/~hsarmien/mineria/datasets/denuncias-2001-2016.txt
+
+# Clustering
+
+La técnica de clustering permite agrupar observaciones o datos que son similares entre sí. 
+En estos 2 laboratorios usaremos 3 métodos de clustering para particionar datos: K-means, clustering jerárquico aglomerativo y DBSCAN (basado en densidad). 
+
+Veremos como emplear cada uno de ellos y algunas formas de graficar los datos.
+
+
+## MÉTODO: K-Means
+
+K-means es un método simple para particionar datos en distintos clusters, que intenta minimizar la distancia de cada punto de un cluster a su centroide. 
+Para ejemplificar, y conocer las funciones de R, haremos un ejemplo práctico donde se ven claramente 2 clusters:
+
+```{r}
+set.seed(2)  # Para evitar aletoriedad en los resultados, ver http://rfunction.com/archives/62
+x = matrix(rnorm(60*2), ncol = 2)  # crea una matriz de números aleatorios de 50 filas y 2 columnas 
+x[1:25,1] = x[1:25,1] + 3   # los primeros 25 se les suma 3
+x[1:25,2] = x[1:25,2] - 4   # los siguientes 25 se les resta 4
+head(x)
+```
+
+```{r}
+plot(x[, 1], x[, 2])
+```
+
+
+Ejecutamos k-means y le indicamos que queremos que divida los datos en 2 clusters :
+```{r}
+set.seed(2)
+km.out <- kmeans(x, 2, nstart = 20)
+```
+
+El parámetro *nstart* indica cuántas veces queremos que se ejecute el metódo. Cada vez que se inicia el método se generan centroides que parten de manera aleatoria.
+Finalmente, se queda con el que tiene el error más bajo.
+
+Podemos inspeccionar el objeto `km.out`:
+
+```{r}
+km.out
+```
+
+Vemos que muestra un resumen con la cantidad de clusters, los tamaños por cluster, los centroides (`cluster means`), el vector (las etiquetas a cada uno de los puntos), el error obtenido, y los atributos posibles del objeto (como `cluster`, `centers`, `totss`, etc.)
+
+Las asignaciones de cada una de las 50 observaciones están contenidas en *k$cluster*:
+```{r}
+km.out$cluster
+```
+
+También podemos saber el tamaño de cada cluster:
+```{r}
+km.out$size
+```
+
+... o donde están ubicados los *centroides*:
+```{r}
+km.out$centers
+```
+
+
+### Estimando la cantidad de clusters
+
+En el ejemplo, creamos los datos y los separamos en dos partes de manera intencional. 
+K-Means necesita el parámetro de la cantidad de clusters, sin embargo no siempre sabremos la cantidad de grupos existentes en los datos.
+
+Una forma de estimar el número de clusters es mediante la suma de la diferencia al cuadrado entre los puntos de cada cluster (también llamado `wss` o método del `codo`).
+
+```{r}
+    set.seed(2)
+    wss <- 0
+    clust <- 15   # graficaremos hasta 15 clusters
+    for (i in 1:clust){
+      wss[i] <- sum(kmeans(x, centers=i, nstart=100)$withinss)   # <---- se ejecuta kmeans 100 veces y se retorna el de mejor WSS dentro de esos 100
+    }
+    plot(1:clust, wss, type="b", xlab="Numero de clusters", ylab="wss")
+```
+
+El gráfico nos muestra el error de K-Means usando diferentes números de clusters. 
+Acá se puede notar que un valor óptimo es 2 (mirar donde se forma el `codo` o el punto tras el cual el error decrece de manera menos significativa -es como tomar la segunda derivada-). 
+Si eligiéramos 3, 4 ó 5, veríamos más particiones, pero posiblemente estaríamos separando clusters ya existentes en clusters más pequeños.
+Ojo que este método es una heurística, y no siempre el `codo` es claramente visible.
+
+¿De qué forma podría mejorar este método para tener una estimación más confiable?
+
+
+
+### Visualización de clusters
+
+Podemos ver si hay grupos entre pares de variables usando `pairs`, lo que genera un scatterplot matrix. 
+Acá podemos notar que hay una separación en los datos. 
+En este caso sólo tenemos dos atributos, por lo que los gráficos serán iguales, pero cuando tenemos más atributos, podemos ver cómo se comportan.
+
+```{r}
+pairs(x)
+```
+
+También podríamos ver cada cluster con colores:
+```{r}
+pairs(x, col=km.out$cluster)
+```
+
+**NOTA**: Para ir viendo distintas particiones en los datos, se podría correr nuevamente la función *kmeans()*, ahora con *k = 3* y luego, generar de nuevo el gráfico anterior. 
+
+También lo podríamos haber hecho con *plot* (puesto que son sólo 2 variables):
+```{r}
+plot(x, main="Resultados usando k = 2", xlab="", ylab="")
+```
+
+Lo mismo en colores: 
+```{r}
+plot(x, col=(km.out$cluster), main="Resultados usando k = 2 (plot con colores)", xlab="", ylab="", pch=20, cex=2)
+```
+
+
+
+
+### Otra forma de visualizar los resultados
+
+Emplearemos un pequeño dataset con ingreso per cápita (IPCAP) en dólares de ciertos países en el año 2015 y 2016. 
+Trataremos de particionar los datos de tal manera que nos permita ver países en similar situación de desarrollo. 
+
+```{r}
+set.seed(2)
+d <- read.csv("https://users.dcc.uchile.cl/~hsarmien/mineria/datasets/ip.txt", row.name = 1, header = T)
+head(d)
+
+# vamos a considerar solo las del año 2015 y año 2016
+d <- d[, c("anio2015", "anio2016")]
+
+#SSE
+wss <- 0
+clust = 15
+for (i in 1:clust){
+  wss[i] <-
+    sum(kmeans(d, centers=i)$withinss)
+}
+
+plot(1:clust, wss, type="b", xlab="Numero de clusters", ylab="wss")
+```
+
+En este caso, se puede apreciar el `codo` usando *k = 2* (o *k = 7* o *k = 9*). 
+En fin, visualizaremos los clusters con *k = 2*. 
+
+```{r}
+set.seed(2)
+k2 <- kmeans(d, 2, nstart=20)
+```
+
+### Visualizando con `ggplot()`: 
+
+```{r}
+library(ggplot2) # instalar si es necesario
+library(GGally)
+d$cluster <- factor(k2$cluster)
+ggpairs(d, aes(colour = cluster))
+ggplot(d, aes(anio2015, anio2016, color = factor(k2$cluster))) +  geom_point() 
+```
+
+### Visualizando con `clusplot()`: 
+
+```{r}
+library("cluster") 
+clusplot(d[, c(1, 2)], k2$cluster, color=TRUE, shade=TRUE, labels=2, lines=0, main="IPCAP (k=2)")
+```
+
+Ahora, haremos lo mismo pero con *k = 3*  y *k = 4*:
+
+```{r}
+set.seed(2)
+k2 <- kmeans(d, 3, nstart=20)
+clusplot(d[, c(1, 2)], k2$cluster, color=TRUE, shade=TRUE, labels=2, lines=0, main="IPCAP (k=3)")
+```
+
+```{r}
+k2 <- kmeans(d, 4, nstart=20)
+clusplot(d[, c(1, 2)], k2$cluster, color=TRUE, shade=TRUE, labels=2, lines=0, main="IPCAP (k=4)")
+```
+
+
+### PCA y T-SNE
+
+Usando Tensorflow Projector (TP) (https://projector.tensorflow.org/), podemos visualizar los datos de manera interactiva. Para visualizar datos de más de dos dimensiones, TP permite calcular componentes principales o usar T-SNE, una técnica que permite reducir dimensionalidad y preservar relaciones entre los datos. T-SNE está disponible en scikit-learn.
+
+
+
+
+## MÉTODO: Clustering Jerárquico Aglomerativo (Hierarchical clustering)
+
+Otra forma de hacer clustering es mediante Clustering Jerárquico Aglomerativo. 
+En R la función `hclust()` permite utilizar este método.
+Usaremos el ejemplo del principio que está almacenado en la variable `x` para graficar un dendrograma usando las 3 técnicas del método: `Complete`, `Single` y `Average` -ver https://nlp.stanford.edu/IR-book/completelink.html-.
+Usaremos además la distancia euclideana para medir distancias - ver https://en.wikipedia.org/wiki/Euclidean_distance - 
+
+```{r}
+hc.complete <- hclust(dist(x), method = "complete")
+hc.single <- hclust(dist(x), method = "single")
+hc.average <- hclust(dist(x), method = "average")
+```
+
+Ahora veamos los dendrogramas:
+```{r, fig.width=12}
+par(mfrow=c(1,3))
+plot(hc.complete, main="Complete", xlab="", ylab="", cex=.9)
+plot(hc.single, main="Single", xlab="", ylab="", cex=.9)
+plot(hc.average, main="Average", xlab="", ylab="", cex=.9)
+```
+
+
+Para ver la asignación de cada observación a un cluster:
+
+```{r}
+cutree(hc.complete, k = 4) # usar 4 clusters
+```
+
+También podemos cortarlo por nivel. 
+
+```{r}
+cutree(hc.complete, h = 2) # el árbol se divide en el nivel 2
+```
+
+Para visualizar los cortes con `k = 4` y metodo complete.
+
+```{r}
+plot(hc.complete, main="Complete", xlab="", ylab="", cex=.9)
+rect.hclust(hc.complete, k=4, border = 2:6) # border indica los colores usados, k es el nro clusters empleados (tambien podría usarse h = 3)
+```
+
+Para escalar las variables (normalizar) antes de hacer clustering jerárquico de las observaciones, se puede emplear `scale`:
+
+```{r}
+xec <- scale(x)
+plot(hclust(dist(xec), method = "complete"), main = "HC complete (scaled features)")
+```
+
+Al aplicar `scale` a un vector, los valores de éste se normalizan al restarle el promedio y dividiendo por la desviación estándar (más información en: https://www.rdocumentation.org/packages/base/versions/3.5.1/topics/scale y https://medium.com/greyatom/why-how-and-when-to-scale-your-features-4b30ab09db5e).
+Sobre un data.frame, se aplica el mismo proceso sobre cada una de las columnas como si fueran vectores independientes.
+
+## MÉTODO: DBSCAN
+
+Este método permite identificar clusters cuyos datos contienen mucho ruido, outliers y presentan una forma poco clara de separar en un plano. 
+Ver ejemplos en http://www.sthda.com/english/sthda-upload/images/cluster-analysis/dbscan-idea.png
+
+Descargaremos uno de los dataset con estas caracteristicas:
+
+```{r}
+library("dbscan")  # instalar si es necesario
+
+x <- read.table('https://users.dcc.uchile.cl/~hsarmien/mineria/datasets/non-spherical.txt')
+head(x)
+plot(x)
+```
+
+```{r}
+db <- dbscan(x[, c(1, 2)], eps = 1, minPts = 20)  # eps es el radio, minPts es la cantidad minima de puntos dentro del radio
+db
+```
+
+Visualizando:
+
+```{r}
+library(ggplot2)
+x$cluster <- factor(db$cluster)
+ggplot(x, aes(x=x, y=y, colour=cluster)) + geom_point()
+
+```
+
+Vemos que el cluster 0 corresponde a puntos de ruido, por lo que el clustering no quedó como hubiésemos esperado. Si cambiamos los valores, obtenemos mejores resultados:
+
+```{r}
+db <- dbscan(x[, c(1, 2)], eps = 1, minPts = 5)  # eps es el radio, minPts es la cantidad minima de puntos dentro del radio
+db
+
+x$cluster <- factor(db$cluster)
+ggplot(x, aes(x=x, y=y, colour=cluster)) + geom_point()
+
+```
+
+
+## Referencias complementarias
+
+* Document clustering with python:  http://brandonrose.org/clustering
+* PCA explained visually: http://setosa.io/ev/principal-component-analysis/ 
+* T-SNE: https://en.wikipedia.org/wiki/T-distributed_stochastic_neighbor_embedding
+* How to use T-SNE effectively: https://distill.pub/2016/misread-tsne/
+
+
